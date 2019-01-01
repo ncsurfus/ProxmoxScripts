@@ -1,9 +1,10 @@
 #r "nuget: Newtonsoft.Json, 12.0.1"
-#load "proxmox-container.csx"
+#load "proxmox-lxc.csx"
 
 using System.Net;
 using System.Net.Http;
 using System.Threading;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Surfus.Secure;
 
@@ -76,7 +77,8 @@ public class Proxmox : IDisposable
             }
             var auth = ParseAuthResponse(body);
             Http.DefaultRequestHeaders.Add("CSRFPreventionToken", auth.Token);
-            _httpHandler.CookieContainer.Add(Http.BaseAddress, new Cookie("PVEAuthCookie", auth.Ticket));
+            var cookieTicket = new Cookie("PVEAuthCookie", auth.Ticket);
+            _httpHandler.CookieContainer.Add(Http.BaseAddress, cookieTicket);
         }
     }
 

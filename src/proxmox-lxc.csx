@@ -1,11 +1,9 @@
 #r "nuget: Surfus.Secure, 1.4.6"
-#r "nuget: Polly, 6.1.2"
 
 using System.Net.Http;
 using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using Polly;
 using Surfus.Secure;
 
 public class ProxmoxLxc
@@ -19,30 +17,19 @@ public class ProxmoxLxc
         _ssh = ssh;
     }
 
-    public async Task ReplaceAsync(string node, string vmid, Dictionary<string, string> configs, CancellationToken ct)
+    public async Task StartAsync(string node, string vmid, CancellationToken ct)
     {
-        var policy = Policy.Handle<Exception>().WaitAndRetryAsync(5, x => TimeSpan.FromMilliseconds(250));
-        await policy.ExecuteAsync(() => StopAsync(node, vmid, ct));
-        await policy.ExecuteAsync(() => DeleteAsync(node, vmid, ct));
-        await policy.ExecuteAsync(() => CreateAsync(node, vmid, configs, ct));
-    }
-
-    public async Task<string> GetStatusAsync(string node, string vmid, CancellationToken ct)
-    {
-        using (var res = await _http.GetAsync($"/api2/extjs/nodes/{node}/lxc/{vmid}/status/current", ct))
+        using (var res = await _http.PostAsync($"/api2/extjs/nodes/{node}/lxc/{vmid}/status/start", null, ct))
         {
             res.EnsureSuccessStatusCode();
             var body = await res.Content.ReadAsStringAsync();
             var result = JsonConvert.DeserializeObject<ApiResponse>(body);
-            if (!result.IsSuccess && result.Message.Contains("does not exist"))
-            {
-                return result.Message;
-            }
             if (!result.IsSuccess)
             {
-                throw new Exception("Failed to get container status!\n" + body);
+                throw new Exception("Failed to start container!\n" + body);
             }
-            return JToken.Parse(body)?["data"]?["status"]?.ToObject<string>();
+            var upid = result.Data.Value<string>();
+            await WaitForTaskAsync(node, upid, ct);
         }
     }
 
@@ -53,22 +40,12 @@ public class ProxmoxLxc
             res.EnsureSuccessStatusCode();
             var body = await res.Content.ReadAsStringAsync();
             var result = JsonConvert.DeserializeObject<ApiResponse>(body);
-            if (!result.IsSuccess && result.Message.Contains("does not exist"))
-            {
-                return;
-            }
-            if (!result.IsSuccess && result.Message.Contains("not running"))
-            {
-                return;
-            }
             if (!result.IsSuccess)
             {
                 throw new Exception("Failed to stop container!\n" + body);
             }
-        }
-        while (await GetStatusAsync(node, vmid, ct) != "stopped")
-        {
-            await Task.Delay(100);
+            var upid = result.Data.Value<string>();
+            await WaitForTaskAsync(node, upid, ct);
         }
     }
 
@@ -79,22 +56,16 @@ public class ProxmoxLxc
             res.EnsureSuccessStatusCode();
             var body = await res.Content.ReadAsStringAsync();
             var result = JsonConvert.DeserializeObject<ApiResponse>(body);
-            if (!result.IsSuccess && result.Message.Contains("does not exist"))
-            {
-                return;
-            }
             if (!result.IsSuccess)
             {
                 throw new Exception("Failed to delete container!\n" + body);
             }
-        }
-        while (!(await GetStatusAsync(node, vmid, ct)).Contains("does not exist"))
-        {
-            await Task.Delay(100);
+            var upid = result.Data.Value<string>();
+            await WaitForTaskAsync(node, upid, ct);
         }
     }
 
-    public async Task CreateAsync(string node, string vmid, Dictionary<string, string> configs, CancellationToken ct)
+    public async Task CreateAsync(string node, Dictionary<string, string> configs, CancellationToken ct)
     {
         using (var form = new FormUrlEncodedContent(configs))
         using (var res = await _http.PostAsync($"/api2/extjs/nodes/{node}/lxc/", form, ct))
@@ -106,14 +77,8 @@ public class ProxmoxLxc
             {
                 throw new Exception("Failed to create container!\n" + body);
             }
-        }
-        if(configs["start"] != "1")
-        {
-            return;
-        }
-        while (await GetStatusAsync(node, vmid, ct) != "running")
-        {
-            await Task.Delay(100);
+            var upid = result.Data.Value<string>();
+            await WaitForTaskAsync(node, upid, ct);
         }
     }
 
@@ -129,10 +94,46 @@ public class ProxmoxLxc
         return result;
     }
 
+    private async Task WaitForTaskAsync(string node, string upid, CancellationToken ct)
+    {
+        while (true)
+        {
+            var task = await GetTaskAsync(node, upid, ct);
+            if (task.Status == "stopped" && task.Message == "OK")
+            {
+                return;
+            }
+            if (task.Status == "stopped")
+            {
+                throw new Exception(task.Message);
+            }
+            await Task.Delay(100);
+        }
+    }
+
+    private async Task<(string Status, string Message)> GetTaskAsync(string node, string upid, CancellationToken ct)
+    {
+        using (var res = await _http.GetAsync($"/api2/json/nodes/{node}/tasks/{upid}/status"))
+        {
+            res.EnsureSuccessStatusCode();
+            var body = await res.Content.ReadAsStringAsync();
+            var result = JsonConvert.DeserializeObject<ApiResponse>(body);
+            if (result.Errors != null || result.Data == null)
+            {
+                throw new Exception("Failed to get task status!\n" + body);
+            }
+            var status = result.Data?["status"]?.Value<string>();
+            var message = result.Data?["exitstatus"]?.Value<string>();
+            return (status, message);
+        }
+    }
+
     private class ApiResponse
     {
         public string Message { get; set; } = "";
         public int? Success { get; set; }
         public bool IsSuccess => Success == 1;
+        public JToken Errors { get; set; }
+        public JToken Data { get; set; }
     }
 }
