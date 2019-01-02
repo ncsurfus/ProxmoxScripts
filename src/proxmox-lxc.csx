@@ -10,16 +10,18 @@ public class ProxmoxLxc
 {
     readonly private HttpClient _http;
     private readonly SshClient _ssh;
+    private readonly string _base;
 
-    internal ProxmoxLxc(HttpClient http, SshClient ssh)
+    internal ProxmoxLxc(string node, HttpClient http, SshClient ssh)
     {
+        _base = $"/api2/extjs/nodes/{node}";
         _http = http;
         _ssh = ssh;
     }
 
-    public async Task StartAsync(string node, string vmid, CancellationToken ct)
+    public async Task StartAsync(string vmid, CancellationToken ct)
     {
-        using (var res = await _http.PostAsync($"/api2/extjs/nodes/{node}/lxc/{vmid}/status/start", null, ct))
+        using (var res = await _http.PostAsync($"{_base}/lxc/{vmid}/status/start", null, ct))
         {
             res.EnsureSuccessStatusCode();
             var body = await res.Content.ReadAsStringAsync();
@@ -29,13 +31,13 @@ public class ProxmoxLxc
                 throw new Exception("Failed to start container!\n" + body);
             }
             var upid = result.Data.Value<string>();
-            await WaitForTaskAsync(node, upid, ct);
+            await WaitForTaskAsync(upid, ct);
         }
     }
 
-    public async Task StopAsync(string node, string vmid, CancellationToken ct)
+    public async Task StopAsync(string vmid, CancellationToken ct)
     {
-        using (var res = await _http.PostAsync($"/api2/extjs/nodes/{node}/lxc/{vmid}/status/stop", null, ct))
+        using (var res = await _http.PostAsync($"{_base}/lxc/{vmid}/status/stop", null, ct))
         {
             res.EnsureSuccessStatusCode();
             var body = await res.Content.ReadAsStringAsync();
@@ -45,13 +47,13 @@ public class ProxmoxLxc
                 throw new Exception("Failed to stop container!\n" + body);
             }
             var upid = result.Data.Value<string>();
-            await WaitForTaskAsync(node, upid, ct);
+            await WaitForTaskAsync(upid, ct);
         }
     }
 
-    public async Task DeleteAsync(string node, string vmid, CancellationToken ct)
+    public async Task DeleteAsync(string vmid, CancellationToken ct)
     {
-        using (var res = await _http.DeleteAsync($"/api2/extjs/nodes/{node}/lxc/{vmid}", ct))
+        using (var res = await _http.DeleteAsync($"{_base}/lxc/{vmid}", ct))
         {
             res.EnsureSuccessStatusCode();
             var body = await res.Content.ReadAsStringAsync();
@@ -61,14 +63,14 @@ public class ProxmoxLxc
                 throw new Exception("Failed to delete container!\n" + body);
             }
             var upid = result.Data.Value<string>();
-            await WaitForTaskAsync(node, upid, ct);
+            await WaitForTaskAsync(upid, ct);
         }
     }
 
-    public async Task CreateAsync(string node, Dictionary<string, string> configs, CancellationToken ct)
+    public async Task CreateAsync(Dictionary<string, string> configs, CancellationToken ct)
     {
         using (var form = new FormUrlEncodedContent(configs))
-        using (var res = await _http.PostAsync($"/api2/extjs/nodes/{node}/lxc/", form, ct))
+        using (var res = await _http.PostAsync($"{_base}/lxc/", form, ct))
         {
             res.EnsureSuccessStatusCode();
             var body = await res.Content.ReadAsStringAsync();
@@ -78,15 +80,14 @@ public class ProxmoxLxc
                 throw new Exception("Failed to create container!\n" + body);
             }
             var upid = result.Data.Value<string>();
-            await WaitForTaskAsync(node, upid, ct);
+            await WaitForTaskAsync(upid, ct);
         }
     }
 
-    // Do we need to define node here?
     public async Task<string> ExecAsync(string vmid, string cmd, CancellationToken ct)
     {
         var exec = $"pct exec {vmid} -- /bin/sh -c '{cmd}'";
-        var result = (await _ssh.ExecuteCommandAsync(exec, ct)).TrimEnd('\r').TrimEnd('\n');
+        var result = (await _ssh.ExecuteCommandAsync(exec, ct)).Trim('\r', '\n');
         if (result.Contains("pct exec <vmid> [<extra-args>]"))
         {
             throw new Exception("Invalid Command\n" + result);
@@ -94,11 +95,11 @@ public class ProxmoxLxc
         return result;
     }
 
-    private async Task WaitForTaskAsync(string node, string upid, CancellationToken ct)
+    private async Task WaitForTaskAsync(string upid, CancellationToken ct)
     {
         while (true)
         {
-            var task = await GetTaskAsync(node, upid, ct);
+            var task = await GetTaskAsync(upid, ct);
             if (task.Status == "stopped" && task.Message == "OK")
             {
                 return;
@@ -111,9 +112,9 @@ public class ProxmoxLxc
         }
     }
 
-    private async Task<(string Status, string Message)> GetTaskAsync(string node, string upid, CancellationToken ct)
+    private async Task<(string Status, string Message)> GetTaskAsync(string upid, CancellationToken ct)
     {
-        using (var res = await _http.GetAsync($"/api2/json/nodes/{node}/tasks/{upid}/status"))
+        using (var res = await _http.GetAsync($"{_base}/tasks/{upid}/status"))
         {
             res.EnsureSuccessStatusCode();
             var body = await res.Content.ReadAsStringAsync();

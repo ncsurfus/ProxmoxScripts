@@ -17,47 +17,64 @@ public class ProxmoxSettings
     public string Password { get; set; }
 }
 
-public class Proxmox : IDisposable
+public class ProxmoxNode : IDisposable
 {
     private string _username;
     private string _realm;
     private string _password;
-    private HttpClientHandler _httpHandler;
+    private HttpClientHandler _httpHandler = new HttpClientHandler();
 
     public string Hostname { get; }
-    public HttpClient Http { get; }
+    public string Node { get; private set; }
+    public HttpClient Http { get; private set; }
     public SshClient Ssh { get; }
-    public ProxmoxLxc Lxc { get; }
+    public ProxmoxLxc Lxc { get; private set; }
 
-    public Proxmox(ProxmoxSettings settings)
+    private ProxmoxNode(ProxmoxSettings settings)
     {
-        _httpHandler = new HttpClientHandler();
-        _httpHandler.ServerCertificateCustomValidationCallback = (_, __, ___, ____) => true;
+        _httpHandler.ServerCertificateCustomValidationCallback = delegate { return true; };
 
         Http = new HttpClient(_httpHandler, true);
         Http.BaseAddress = new Uri(settings.ApiBaseUri);
 
         Ssh = new SshClient(settings.Hostname);
-        Lxc = new ProxmoxLxc(Http, Ssh);
+
         Hostname = settings.Hostname;
         _username = settings.Username;
         _realm = settings.Realm;
         _password = settings.Password;
     }
 
-    public async Task ConnectAsync(CancellationToken ct)
+    public static async Task<ProxmoxNode> ConnectAsync(ProxmoxSettings settings, CancellationToken ct)
     {
-        await HttpConnectAsync(ct);
+        var node = new ProxmoxNode(settings);
+        try
+        {
+            await node.ConnectAsync(ct);
+            return node;
+        }
+        catch
+        {
+            node.Dispose();
+            throw;
+        }
+    }
+
+    private async Task ConnectAsync(CancellationToken ct)
+    {
         await SshConnectAsync(ct);
+        await HttpConnectAsync(ct);
+        Lxc = new ProxmoxLxc(Node, Http, Ssh);
     }
 
     private async Task SshConnectAsync(CancellationToken ct)
     {
-        await Ssh.ConnectAsync();
-        if (!await Ssh.AuthenticateAsync(_username, _password))
+        await Ssh.ConnectAsync(ct);
+        if (!await Ssh.AuthenticateAsync(_username, _password, ct))
         {
             throw new Exception("Authentication failed (SSH).");
         }
+        Node = (await Ssh.ExecuteCommandAsync("hostname", ct)).Trim('\n');
     }
 
     private async Task HttpConnectAsync(CancellationToken ct)

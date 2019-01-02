@@ -1,6 +1,6 @@
-#load "proxmox.csx"
+#load "proxmox-node.csx"
 
-var Config = new
+static var Config = new
 {
     Node = "proxmox",
     Lxc = new
