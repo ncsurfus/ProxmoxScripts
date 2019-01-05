@@ -13,16 +13,16 @@ public class LxcContainer
 
 public static class LxcUtils
 {
-    public static async Task ReplaceAsync(LxcContainer con, TimeSpan timeout)
+    public static async Task DeployAsync(LxcContainer con, TimeSpan timeout, bool replace = true)
     {
         using (var cts = new CancellationTokenSource(timeout))
         using (var proxmox = await ProxmoxNode.ConnectAsync(Config.Proxmox, cts.Token))
         {
-            await ReplaceAsync(proxmox, con, cts.Token);
+            await DeployAsync(proxmox, con, replace, cts.Token);
         }
     }
 
-    public static async Task ReplaceAsync(ProxmoxNode proxmox, LxcContainer con, CancellationToken ct)
+    public static async Task DeployAsync(ProxmoxNode proxmox, LxcContainer con, bool replace, CancellationToken ct)
     {
         var lxcConf = $"/etc/pve/lxc/{con.Vmid}.conf";
         var configs = new Dictionary<string, string>(con.Config);
@@ -30,8 +30,12 @@ public static class LxcUtils
         configs["vmid"] = con.Vmid;
         var template = con.Config.TryGetValue("ostemplate", out var tle) ? tle : "";
 
-        await StopIfRunning(proxmox.Lxc, con.Vmid, ct);
-        await DeleteIfExists(proxmox.Lxc, con.Vmid, ct);
+        if (replace)
+        {
+            await StopIfRunning(proxmox.Lxc, con.Vmid, ct);
+            await DeleteIfExists(proxmox.Lxc, con.Vmid, ct);
+        }
+
         await proxmox.Lxc.CreateAsync(configs, ct);
 
         foreach (var config in con.PostConfig)
@@ -46,7 +50,7 @@ public static class LxcUtils
         {
             Console.WriteLine($"Executing: '{cmd}'");
             var result = await proxmox.Lxc.ExecAsync(con.Vmid, cmd, ct);
-            if(!String.IsNullOrWhiteSpace(result))
+            if (!String.IsNullOrWhiteSpace(result))
             {
                 Console.WriteLine(result);
             }

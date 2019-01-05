@@ -1,0 +1,18 @@
+vmid: 101
+config:
+  hostname: fileserver
+  rootfs: local-lvm:30
+  ostemplate: local:vztmpl/alpine-3.8-default_20180913_amd64.tar.xz
+  cores: 2
+  memory: 512
+  swap: 0
+  net0: bridge=vmbr0,name=eth0,ip=192.168.0.130/23,gw=192.168.0.1
+  nameserver: 192.168.0.4
+commands:
+  - apk add darkhttpd curl
+  - rc-update add darkhttpd
+  - rc-service darkhttpd start
+  - curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip
+  - unzip rclone-current-linux-amd64.zip
+  - mv rclone-v1.45-linux-amd64/rclone /usr/bin/
+  - echo Welcome to the FileServer > /var/www/localhost/htdocs/index.html

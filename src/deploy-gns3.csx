@@ -1,4 +1,4 @@
-#load "proxmox-script.csx"
+#load "deployments.csx"
 
 var cmds = new[]
 {
@@ -29,10 +29,10 @@ var cmds = new[]
 
 var con = new LxcContainer
 {
-    Vmid = "201",
+    Vmid = "303",
     Config = new Dictionary<string, string>
     {
-        {"hostname", "gns3-test-2"},
+        {"hostname", "gns3"},
         {"password", Config.Lxc.Password},
         {"ssh-public-keys", Config.Lxc.PubKey},
         {"arch", "amd64"},
@@ -55,4 +55,4 @@ var con = new LxcContainer
 };
 
 
-await LxcUtils.ReplaceAsync(con, TimeSpan.FromMinutes(10));
+await LxcUtils.DeployAsync(con, TimeSpan.FromMinutes(10));

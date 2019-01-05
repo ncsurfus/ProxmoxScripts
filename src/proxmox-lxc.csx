@@ -86,7 +86,12 @@ public class ProxmoxLxc
 
     public async Task<string> ExecAsync(string vmid, string cmd, CancellationToken ct)
     {
-        var exec = $"pct exec {vmid} -- /bin/sh -c '{cmd}'";
+        // https://stackoverflow.com/questions/1279953/how-to-execute-the-output-of-a-command-within-the-current-shell
+        // pct exec 301 -- /bin/sh -c 'echo ZWNobyAndGVzdCcgJiYgZWNobyAidGVzdCI= | base64 -d | . /dev/stdin'
+        // tested: alpine | ubuntu
+        var cmdBytes = Encoding.UTF8.GetBytes(cmd);
+        var cmdBase64 = Convert.ToBase64String(cmdBytes);
+        var exec = $"pct exec {vmid} -- /bin/sh -c 'echo {cmdBase64} | base64 -d | sh'";
         var result = (await _ssh.ExecuteCommandAsync(exec, ct)).Trim('\r', '\n');
         if (result.Contains("pct exec <vmid> [<extra-args>]"))
         {
